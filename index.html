@@ -476,9 +476,8 @@ input[type=range]::-webkit-slider-thumb {
 
 <script>
 // ── LOCK ──────────────────────────────────────────────────
-// SHA-256 해시로 비밀번호 저장 (평문 노출 방지)
-// 비밀번호: hyunmin2026 → 변경하려면 아래 PASS_HASH 값을 교체
-const PASS_HASH = 'b7e7f9e2a3c1d4f0a8b2e6c9d3f1a5b8e2c4d6f0a1b3e5c7d9f2a4b6e8c0d2f4';
+// 비밀번호: 081412 (SHA-256 고정)
+const PASS_HASH = 'b433c6eebef1ce636ca2ef5e8e30b84f9c71d3882852d4e3254017bd673cb368';
 
 async function sha256(str) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
@@ -488,19 +487,7 @@ async function sha256(str) {
 async function tryUnlock() {
   const input = document.getElementById('lock-input').value;
   const hash  = await sha256(input);
-  // 첫 접속 시 비밀번호 설정 모드
-  const savedHash = localStorage.getItem('hm_pass_hash');
-  if (!savedHash) {
-    // 아직 비밀번호 미설정 → 입력한 값을 비밀번호로 등록
-    if (input.length < 4) {
-      document.getElementById('lock-error').textContent = '4자 이상 입력해주세요';
-      return;
-    }
-    localStorage.setItem('hm_pass_hash', hash);
-    unlock();
-    return;
-  }
-  if (hash === savedHash) {
+  if (hash === PASS_HASH) {
     sessionStorage.setItem('hm_unlocked', '1');
     unlock();
   } else {
@@ -519,14 +506,9 @@ function unlock() {
 }
 
 function checkLock() {
-  // 이미 이 세션에서 인증했으면 바로 열기
   if (sessionStorage.getItem('hm_unlocked') === '1') {
     unlock();
     return;
-  }
-  // 비밀번호 미설정 상태면 설정 안내
-  if (!localStorage.getItem('hm_pass_hash')) {
-    document.querySelector('#lock-screen p').textContent = '처음 접속이에요. 사용할 비밀번호를 입력해주세요';
   }
   document.getElementById('lock-input').focus();
 }
