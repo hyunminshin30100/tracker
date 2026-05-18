@@ -280,12 +280,6 @@ input[type=range]::-webkit-slider-thumb {
       <p id="today-str"></p>
       <p id="sync-status" style="font-size:11px;margin-top:2px;transition:color .3s"></p>
     </div>
-    <div style="display:flex;gap:6px;flex-shrink:0;margin-top:2px">
-      <button class="date-nav" onclick="exportData()" style="font-size:11px;padding:5px 10px" title="데이터 내보내기">↑ 내보내기</button>
-      <label class="date-nav" style="font-size:11px;padding:5px 10px;cursor:pointer" title="데이터 가져오기">
-        ↓ 가져오기<input type="file" accept=".json" onchange="importData(event)" style="display:none">
-      </label>
-    </div>
   </div>
 
   <div class="nav">
@@ -608,42 +602,6 @@ function setSyncStatus(status) {
   if (status === 'syncing') { el.textContent = '↻ 동기화 중...'; el.style.color = 'var(--text3)'; }
   if (status === 'ok')      { el.textContent = '✓ 동기화됨';    el.style.color = 'var(--green)';  }
   if (status === 'offline') { el.textContent = '● 오프라인';    el.style.color = 'var(--amber)';  }
-}
-
-// ── EXPORT / IMPORT ───────────────────────────────────────
-function exportData() {
-  const payload = JSON.stringify(state.data, null, 2);
-  const blob = new Blob([payload], { type: 'application/json' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  const date = new Date().toISOString().split('T')[0];
-  a.href     = url;
-  a.download = `hyunmin_tracker_${date}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function importData(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = ev => {
-    try {
-      const parsed = JSON.parse(ev.target.result);
-      if (typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
-      const confirmed = confirm('⚠️ 가져오기를 실행하면 현재 기기의 모든 데이터가 교체됩니다.\n\n계속하시겠습니까?');
-      if (!confirmed) { e.target.value = ''; return; }
-      state.data = parsed;
-      persist();
-      sbSave();
-      renderDaily();
-      showUndoToast('✓ 데이터를 성공적으로 가져왔어요');
-    } catch {
-      alert('올바른 트래커 JSON 파일이 아니에요.');
-    }
-    e.target.value = '';
-  };
-  reader.readAsText(file);
 }
 
 // ── UNDO ──────────────────────────────────────────────────
