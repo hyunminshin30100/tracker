@@ -655,7 +655,12 @@ document.addEventListener('keydown', e => {
   }
 });
 
-function dayKey(d) { return d.toISOString().split('T')[0]; }
+function dayKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 function weekKey(d) { return 'wk_' + dayKey(d); }
 function monthKey(m) { return 'mo_2026_' + m; }
 
