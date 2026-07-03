@@ -170,10 +170,7 @@ input[type=range]::-webkit-slider-thumb {
 .goal-input:focus { border-color: rgba(124,110,247,0.5); }
 .goal-text-inner {
   font-size: 13px; color: var(--text); line-height: 1.55;
-  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical;
-  overflow: hidden; cursor: pointer; transition: all .2s;
 }
-.goal-text-inner.expanded { -webkit-line-clamp: unset; overflow: visible; display: block; }
 /* Calendar */
 .cal-dow { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; margin-bottom:3px; }
 .cal-dow-cell { text-align:center; font-size:11px; color:var(--text3); padding:4px 0; font-weight:600; }
@@ -206,6 +203,15 @@ input[type=range]::-webkit-slider-thumb {
 .tr-val-input { flex:1; padding:4px 8px; background:transparent; border:none; color:var(--text); font-size:13px; font-family:inherit; outline:none; }
 .tr-val-input::placeholder { color:var(--text3); }
 .tr-val-input:focus { background:var(--bg3); border-radius:5px; }
+
+/* Image attachments */
+.img-gallery { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.img-thumb-wrap { position: relative; width: 64px; height: 64px; }
+.img-thumb { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; border: 0.5px solid var(--border2); cursor: pointer; display: block; }
+.img-thumb-del { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%; border: none; background: var(--red); color: #fff; font-size: 10px; line-height: 18px; text-align: center; cursor: pointer; padding: 0; }
+.img-add-btn { margin-top: 8px; padding: 6px 12px; border: 0.5px dashed var(--border2); border-radius: var(--radius); background: transparent; color: var(--text2); font-size: 12px; font-family: inherit; cursor: pointer; transition: all .12s; }
+.img-add-btn:hover { border-color: var(--accent); color: var(--text); }
+.img-add-btn:disabled { opacity: 0.5; cursor: default; }
 
 /* ── Mobile ─────────────────────────────────────────── */
 @media (max-width: 480px) {
@@ -243,6 +249,9 @@ input[type=range]::-webkit-slider-thumb {
   /* 데이트 nav */
   .date-nav { padding: 7px 12px; font-size: 15px; }
   .date-label { font-size: 14px; }
+  /* 사진 첨부 버튼 터치 영역 확보 */
+  .img-add-btn { padding: 9px 14px; font-size: 13px; }
+  .img-thumb-wrap { width: 72px; height: 72px; }
 }
 /* ── Lock screen ─────────────────────────────────────── */
 #lock-screen {
@@ -402,6 +411,8 @@ input[type=range]::-webkit-slider-thumb {
     <div class="card">
       <div class="card-title">할 일 목록</div>
       <textarea id="todo" placeholder="1. &#10;2. &#10;3. " oninput="autoSaveDaily()" onblur="syncTodoOnBlur()"></textarea>
+      <div class="img-gallery" id="todo-images"></div>
+      <button type="button" class="img-add-btn" id="todo-img-add">📷 사진 추가</button>
     </div>
   </div>
 
@@ -424,11 +435,15 @@ input[type=range]::-webkit-slider-thumb {
     <div class="card">
       <div class="card-title">리셀 사업 피드백</div>
       <textarea id="resell-feedback" placeholder="이번 주 리셀 사업 피드백, 소싱 현황, 매입/판매 내역..." oninput="autoSaveWeekly()"></textarea>
+      <div class="img-gallery" id="resell-images"></div>
+      <button type="button" class="img-add-btn" id="resell-img-add">📷 사진 추가</button>
     </div>
 
     <div class="card">
       <div class="card-title">주간 비고 / 전체 피드백</div>
       <textarea id="weekly-note" placeholder="이번 주 총정리, 저지른 실수, 다음 주 방향..." oninput="autoSaveWeekly()"></textarea>
+      <div class="img-gallery" id="note-images"></div>
+      <button type="button" class="img-add-btn" id="note-img-add">📷 사진 추가</button>
     </div>
 
     <div class="card">
@@ -453,6 +468,8 @@ input[type=range]::-webkit-slider-thumb {
     <div class="card">
       <div class="card-title">월간 피드백</div>
       <textarea id="monthly-feedback" placeholder="이달 전체 피드백, 잘한 것, 부족한 것, 다음 달 방향..." oninput="autoSaveMonthly()"></textarea>
+      <div class="img-gallery" id="monthly-feedback-images"></div>
+      <button type="button" class="img-add-btn" id="monthly-feedback-img-add">📷 사진 추가</button>
     </div>
   </div>
 
@@ -499,6 +516,8 @@ input[type=range]::-webkit-slider-thumb {
       <textarea id="mission-text" style="min-height:320px;line-height:1.8;font-size:14px"
         placeholder="나는 왜 월천을 해야 하는가.&#10;&#10;나의 사명은..."
         oninput="autoSaveMission()"></textarea>
+      <div class="img-gallery" id="mission-images"></div>
+      <button type="button" class="img-add-btn" id="mission-img-add">📷 사진 추가</button>
     </div>
 
   </div>
@@ -596,8 +615,86 @@ let state = {
 const SB_URL = 'https://becdgfnebtsngjkcydbh.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJlY2RnZm5lYnRzbmdqa2N5ZGJoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwNzQ1MjEsImV4cCI6MjA5NDY1MDUyMX0.57xyN4852jYg4ZRQith9BLhrZxdXdFeSusZM5rCgGUQ';
 const SB_HEADERS = { 'Content-Type': 'application/json', 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY };
+const SB_BUCKET = 'tracker-images';
 
 let syncTimer = null;
+
+// ── IMAGE ATTACHMENTS ─────────────────────────────────────
+async function uploadImage(file) {
+  const ext = (file.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+  const path = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const res = await fetch(`${SB_URL}/storage/v1/object/${SB_BUCKET}/${path}`, {
+    method: 'POST',
+    headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Content-Type': file.type || 'application/octet-stream' },
+    body: file
+  });
+  if (!res.ok) throw new Error('upload failed: ' + res.status);
+  return `${SB_URL}/storage/v1/object/public/${SB_BUCKET}/${path}`;
+}
+
+// textareaEl에 사진 첨부(모바일: 버튼 선택 / 데스크톱: Ctrl+V 붙여넣기) 기능을 연결
+// getStore/setStore는 현재 렌더링 시점의 날짜/주/월 키에 바인딩된 클로저
+function initImageField(textareaEl, galleryEl, addBtnEl, getStore, setStore) {
+  function render() {
+    const images = getStore();
+    galleryEl.innerHTML = images.map((url, i) => `
+      <div class="img-thumb-wrap">
+        <img src="${url}" class="img-thumb" onclick="window.open(this.src,'_blank')">
+        <button type="button" class="img-thumb-del" data-i="${i}">✕</button>
+      </div>`).join('');
+    galleryEl.querySelectorAll('.img-thumb-del').forEach(btn => {
+      btn.onclick = () => {
+        const arr = getStore();
+        arr.splice(parseInt(btn.dataset.i), 1);
+        setStore(arr);
+        render();
+      };
+    });
+  }
+
+  async function handleFile(file) {
+    if (!file || !file.type.startsWith('image/')) return;
+    const origLabel = addBtnEl.textContent;
+    addBtnEl.textContent = '업로드 중...';
+    addBtnEl.disabled = true;
+    try {
+      const url = await uploadImage(file);
+      const arr = getStore();
+      arr.push(url);
+      setStore(arr);
+      render();
+    } catch (e) {
+      alert('사진 업로드에 실패했어요. Supabase Storage에 "tracker-images" 퍼블릭 버킷이 있는지 확인해주세요.');
+    }
+    addBtnEl.textContent = origLabel;
+    addBtnEl.disabled = false;
+  }
+
+  addBtnEl.onclick = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = () => { if (input.files[0]) handleFile(input.files[0]); };
+    input.click();
+  };
+
+  if (textareaEl._pasteHandler) textareaEl.removeEventListener('paste', textareaEl._pasteHandler);
+  const pasteHandler = e => {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        handleFile(item.getAsFile());
+        break;
+      }
+    }
+  };
+  textareaEl.addEventListener('paste', pasteHandler);
+  textareaEl._pasteHandler = pasteHandler;
+
+  render();
+}
 
 async function sbLoad() {
   try {
@@ -761,6 +858,13 @@ function renderDaily() {
   document.getElementById('comfort-zone').value = saved.comfortZone || '';
   document.getElementById('diary').value = saved.diary || '';
   document.getElementById('todo').value = saved.todo || '';
+  initImageField(
+    document.getElementById('todo'),
+    document.getElementById('todo-images'),
+    document.getElementById('todo-img-add'),
+    () => getKey(dk).todoImages || [],
+    (arr) => { const s = getKey(dk); s.todoImages = arr; setKey(dk, s); }
+  );
   const sc = saved.score || 0;
   document.getElementById('score-slider').value = Math.round(sc * 10);
   document.getElementById('score-display').textContent = sc > 0 ? sc.toFixed(1) : '-';
@@ -847,6 +951,20 @@ function renderWeekly() {
   document.getElementById('weekly-exercise').value = wsaved.exercise || '';
   document.getElementById('resell-feedback').value = wsaved.resellFeedback || '';
   document.getElementById('weekly-note').value = wsaved.note || '';
+  initImageField(
+    document.getElementById('resell-feedback'),
+    document.getElementById('resell-images'),
+    document.getElementById('resell-img-add'),
+    () => getKey(wk).resellImages || [],
+    (arr) => { const s = getKey(wk); s.resellImages = arr; setKey(wk, s); }
+  );
+  initImageField(
+    document.getElementById('weekly-note'),
+    document.getElementById('note-images'),
+    document.getElementById('note-img-add'),
+    () => getKey(wk).noteImages || [],
+    (arr) => { const s = getKey(wk); s.noteImages = arr; setKey(wk, s); }
+  );
 
   const days = [];
   for (let i = 0; i < 7; i++) { const d = new Date(ws); d.setDate(d.getDate() + i); days.push(d); }
@@ -902,6 +1020,13 @@ function renderMonthly() {
   const mk = monthKey(state.currentMonth);
   const ms = getKey(mk);
   document.getElementById('monthly-feedback').value = ms.feedback || '';
+  initImageField(
+    document.getElementById('monthly-feedback'),
+    document.getElementById('monthly-feedback-images'),
+    document.getElementById('monthly-feedback-img-add'),
+    () => getKey(mk).feedbackImages || [],
+    (arr) => { const s = getKey(mk); s.feedbackImages = arr; setKey(mk, s); }
+  );
 
   // stats
   const now = new Date();
@@ -933,7 +1058,7 @@ function renderMonthly() {
     const row = document.createElement('div'); row.className = 'goal-row';
     row.innerHTML = `<div class="goal-num">${i+1}</div>
       <div class="goal-body">
-        <div class="goal-text-inner" onclick="this.classList.toggle('expanded')">${g || '(목표 없음)'}</div>
+        <div class="goal-text-inner">${g || '(목표 없음)'}</div>
         <input type="text" class="goal-input" data-idx="${i}" value="${g.replace(/"/g,'&quot;')}" placeholder="목표 ${i+1}" style="margin-bottom:6px;display:none" oninput="autoSaveMonthGoalText('${mk}',${i},this)">
         <div class="goal-btns" style="margin-top:6px">
           <button class="g-tog ${val==='O'?'sel-o':''}" onclick="setMonthGoal('${mk}',${i},'O',this)">O</button>
@@ -1028,7 +1153,7 @@ function renderYearly() {
     const row = document.createElement('div'); row.className = 'goal-row';
     row.innerHTML = `<div class="goal-num">${i+1}</div>
       <div class="goal-body">
-        <div class="goal-text-inner" onclick="this.classList.toggle('expanded')">${g || '(목표 없음)'}</div>
+        <div class="goal-text-inner">${g || '(목표 없음)'}</div>
         <input type="text" class="goal-input yearly-goal-input" data-idx="${i}" value="${g.replace(/"/g,'&quot;')}" placeholder="목표 ${i+1}" style="margin-bottom:6px;display:none" oninput="autoSaveYearGoal(this)">
         <div class="goal-btns" style="margin-top:6px">
           <button class="g-tog ${val==='O'?'sel-o':''}" onclick="setYearGoal(${i},'O',this)">O</button>
@@ -1332,6 +1457,13 @@ function renderCalDetail(dk) {
 function renderMission() {
   const m = getKey('mission');
   document.getElementById('mission-text').value = m.text || '';
+  initImageField(
+    document.getElementById('mission-text'),
+    document.getElementById('mission-images'),
+    document.getElementById('mission-img-add'),
+    () => getKey('mission').images || [],
+    (arr) => { const s = getKey('mission'); s.images = arr; setKey('mission', s); }
+  );
 }
 
 function autoSaveMission() {
