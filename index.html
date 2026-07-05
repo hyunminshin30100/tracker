@@ -213,16 +213,24 @@ input[type=range]::-webkit-slider-thumb {
 .img-add-btn:hover { border-color: var(--accent); color: var(--text); }
 .img-add-btn:disabled { opacity: 0.5; cursor: default; }
 
-/* 실행취소 (모바일엔 Ctrl+Z가 없어서 항상 떠 있는 버튼) */
-#mobile-undo-btn {
-  position: fixed; bottom: 20px; left: 16px; z-index: 9998;
+/* 실행취소/다시 실행 (모바일엔 Ctrl+Z가 없어서 항상 떠 있는 버튼) */
+#mobile-undo-btn, #mobile-redo-btn {
+  position: fixed; bottom: 20px; z-index: 9998;
   width: 46px; height: 46px; border-radius: 50%;
   background: var(--bg2); border: 0.5px solid var(--border2);
   color: var(--text2); font-size: 20px; line-height: 1;
   display: flex; align-items: center; justify-content: center;
   cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,0.45);
 }
-#mobile-undo-btn:active { background: var(--bg3); color: var(--text); }
+#mobile-undo-btn { left: 16px; }
+#mobile-redo-btn { left: 70px; }
+#mobile-undo-btn:active, #mobile-redo-btn:active { background: var(--bg3); color: var(--text); }
+
+/* 체크리스트 편집 - 드래그로 순서 변경 */
+.checklist-edit-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 0.5px solid var(--border); position: relative; background: var(--bg2); }
+.checklist-edit-row.dragging { z-index: 20; background: var(--bg3); box-shadow: 0 4px 14px rgba(0,0,0,0.4); border-radius: 6px; }
+.drag-handle { cursor: grab; color: var(--text3); font-size: 16px; padding: 4px 2px; touch-action: none; user-select: none; flex-shrink: 0; }
+.drag-handle:active { cursor: grabbing; color: var(--text); }
 
 /* ── Mobile ─────────────────────────────────────────── */
 @media (max-width: 480px) {
@@ -534,6 +542,7 @@ input[type=range]::-webkit-slider-thumb {
   </div>
 
   <button type="button" id="mobile-undo-btn" onclick="undoLast()" title="실행취소">↩</button>
+  <button type="button" id="mobile-redo-btn" onclick="redoLast()" title="다시 실행">↪</button>
 
 </div>
 
@@ -594,6 +603,36 @@ function getDailyItems() {
 }
 // DAILY_ITEMS 참조를 getDailyItems() 로 대체 (하위 호환)
 Object.defineProperty(window, 'DAILY_ITEMS', { get: getDailyItems });
+
+// 체크리스트 "순서"만 날짜별로 분리 기록 — 순서를 바꾼 날부터 미래에만 적용되고,
+// 과거 날짜는 그 당시 유효했던 순서 그대로 보여준다 (항목 추가/삭제는 지금처럼 전체 날짜 공통 적용).
+function recordDailyOrderSnapshot(prevOrder) {
+  const items = getDailyItems();
+  const today = dayKey(new Date());
+  const log = getKey('daily_order_log');
+  if (!log.entries) log.entries = [];
+  // 첫 순서 변경이라면, 변경 전 순서를 과거 전체에 적용되는 기준점으로 먼저 기록
+  if (!log.entries.length && prevOrder && prevOrder.length) {
+    log.entries.push({ date: '0000-01-01', order: prevOrder });
+  }
+  const order = items.map(it => it.id);
+  const todayEntry = log.entries.find(e => e.date === today);
+  if (todayEntry) todayEntry.order = order;
+  else { log.entries.push({ date: today, order }); log.entries.sort((a, b) => a.date < b.date ? -1 : 1); }
+  setKey('daily_order_log', log);
+}
+
+function getDailyItemsForDay(dk) {
+  const currentItems = getDailyItems();
+  const log = getKey('daily_order_log').entries || [];
+  let applicable = null;
+  for (const entry of log) { if (entry.date <= dk) applicable = entry; else break; }
+  if (!applicable) return currentItems;
+  const idToItem = new Map(currentItems.map(it => [it.id, it]));
+  const ordered = applicable.order.map(id => idToItem.get(id)).filter(Boolean);
+  currentItems.forEach(it => { if (!applicable.order.includes(it.id)) ordered.push(it); });
+  return ordered;
+}
 
 const YEARLY_GOALS = [
   '리셀 사업으로 순이익 월천 달성하기 (월매출 1억)',
@@ -754,8 +793,9 @@ function setSyncStatus(status) {
   if (status === 'offline') { el.textContent = '● 오프라인';    el.style.color = 'var(--amber)';  }
 }
 
-// ── UNDO ──────────────────────────────────────────────────
+// ── UNDO / REDO ───────────────────────────────────────────
 const undoStack = [];   // { key, prev, tab, month, day }
+const redoStack = [];   // undo로 되돌린 것을 다시 적용하기 위한 스택
 const UNDO_LIMIT = 50;
 
 function setKey(key, val) {
@@ -763,6 +803,7 @@ function setKey(key, val) {
   const prev = state.data[key] ? JSON.parse(JSON.stringify(state.data[key])) : null;
   undoStack.push({ key, prev, tab: state.tab, month: state.currentMonth, day: new Date(state.currentDay) });
   if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+  redoStack.length = 0; // 새 변경이 생기면 다시가기 이력은 무효
   state.data[key] = val;
   persist();
 }
@@ -770,13 +811,7 @@ function setKey(key, val) {
 // setKey가 찍는 "되돌릴 이전 값" 스냅샷이 오염되지 않는다.
 function getKey(key) { return state.data[key] ? JSON.parse(JSON.stringify(state.data[key])) : {}; }
 
-function undoLast() {
-  if (!undoStack.length) return;
-  const { key, prev, tab, month, day } = undoStack.pop();
-  if (prev === null) { delete state.data[key]; }
-  else { state.data[key] = prev; }
-  persist();
-  // 화면 복원
+function restoreView(tab, month, day) {
   if (tab === 'daily')   { state.currentDay = day; renderDaily(); }
   if (tab === 'weekly')  renderWeekly();
   if (tab === 'monthly') { state.currentMonth = month; renderMonthly(); }
@@ -784,8 +819,32 @@ function undoLast() {
   if (tab === 'cal')     renderCal();
   if (tab === 'todo')    renderTodo();
   if (tab === 'mission') renderMission();
-  // toast
-  showUndoToast();
+}
+
+function undoLast() {
+  if (!undoStack.length) return;
+  const { key, prev, tab, month, day } = undoStack.pop();
+  // 현재 값을 redo 스택에 보관한 뒤 이전 값으로 복원
+  const cur = state.data[key] ? JSON.parse(JSON.stringify(state.data[key])) : null;
+  redoStack.push({ key, next: cur, tab, month, day });
+  if (prev === null) { delete state.data[key]; }
+  else { state.data[key] = prev; }
+  persist();
+  restoreView(tab, month, day);
+  showUndoToast('↩ 실행 취소');
+}
+
+function redoLast() {
+  if (!redoStack.length) return;
+  const { key, next, tab, month, day } = redoStack.pop();
+  // 다시 적용하기 전 현재 값을 undo 스택에 되돌려놓는다
+  const cur = state.data[key] ? JSON.parse(JSON.stringify(state.data[key])) : null;
+  undoStack.push({ key, prev: cur, tab, month, day });
+  if (next === null) { delete state.data[key]; }
+  else { state.data[key] = next; }
+  persist();
+  restoreView(tab, month, day);
+  showUndoToast('↪ 다시 실행');
 }
 
 function showUndoToast(msg) {
@@ -803,9 +862,14 @@ function showUndoToast(msg) {
 }
 
 document.addEventListener('keydown', e => {
-  if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
     e.preventDefault();
     undoLast();
+  }
+  // Ctrl+Shift+Z 또는 Ctrl+Y → 다시 실행
+  if ((e.metaKey || e.ctrlKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
+    e.preventDefault();
+    redoLast();
   }
 });
 
@@ -859,7 +923,7 @@ function renderDaily() {
 
   const container = document.getElementById('daily-checks');
   container.innerHTML = '';
-  DAILY_ITEMS.forEach(item => {
+  getDailyItemsForDay(dk).forEach(item => {
     const val = saved[item.id] || '';
     const row = document.createElement('div'); row.className = 'check-item';
     row.innerHTML = `<span class="check-label">${item.label}</span>
@@ -1279,8 +1343,10 @@ function renderChecklistEditPanel() {
   list.innerHTML = '';
   items.forEach((item, i) => {
     const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:0.5px solid var(--border)';
+    row.className = 'checklist-edit-row';
+    row.dataset.id = item.id;
     row.innerHTML = `
+      <span class="drag-handle" onpointerdown="startChecklistDrag(event,'${item.id}')">⠿</span>
       <span style="font-size:12px;color:var(--text3);min-width:18px">${i+1}</span>
       <input type="text" class="checklist-edit-input" data-idx="${i}" value="${item.label.replace(/"/g,'&quot;')}"
         oninput="autoSaveChecklistItem(this)"
@@ -1288,6 +1354,61 @@ function renderChecklistEditPanel() {
       <button onclick="removeChecklistItem(${i})" style="background:transparent;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:2px 4px;flex-shrink:0">✕</button>`;
     list.appendChild(row);
   });
+}
+
+// ── 체크리스트 드래그 순서 변경 (마우스 + 터치 공용, Pointer Events) ──
+let checklistDrag = null;
+
+function startChecklistDrag(e, id) {
+  e.preventDefault();
+  const listEl = document.getElementById('checklist-edit-list');
+  const rowEl = listEl.querySelector(`.checklist-edit-row[data-id="${id}"]`);
+  checklistDrag = { id, listEl, rowEl, startY: e.clientY, startOrder: getDailyItems().map(it => it.id) };
+  rowEl.classList.add('dragging');
+  document.addEventListener('pointermove', onChecklistDragMove);
+  document.addEventListener('pointerup', onChecklistDragEnd);
+}
+
+function onChecklistDragMove(e) {
+  if (!checklistDrag) return;
+  const { listEl } = checklistDrag;
+  const dy = e.clientY - checklistDrag.startY;
+  checklistDrag.rowEl.style.transform = `translateY(${dy}px)`;
+
+  const items = getDailyItems();
+  const draggingIdx = items.findIndex(it => it.id === checklistDrag.id);
+  const rows = Array.from(listEl.querySelectorAll('.checklist-edit-row'));
+  let targetIdx = draggingIdx;
+  rows.forEach((row, i) => {
+    if (row === checklistDrag.rowEl) return;
+    const rect = row.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    if (e.clientY > midY && i > targetIdx) targetIdx = i;
+    if (e.clientY < midY && i < targetIdx) targetIdx = i;
+  });
+
+  if (targetIdx !== draggingIdx) {
+    const [moved] = items.splice(draggingIdx, 1);
+    items.splice(targetIdx, 0, moved);
+    setKey('daily_items', { list: items });
+    checklistDrag.startY = e.clientY; // 재배치 후 기준점 초기화 (점프 방지)
+    renderChecklistEditPanel();
+    checklistDrag.rowEl = listEl.querySelector(`.checklist-edit-row[data-id="${checklistDrag.id}"]`);
+    checklistDrag.rowEl.classList.add('dragging');
+  }
+}
+
+function onChecklistDragEnd() {
+  if (!checklistDrag) return;
+  checklistDrag.rowEl.classList.remove('dragging');
+  checklistDrag.rowEl.style.transform = '';
+  document.removeEventListener('pointermove', onChecklistDragMove);
+  document.removeEventListener('pointerup', onChecklistDragEnd);
+  const startOrder = checklistDrag.startOrder;
+  checklistDrag = null;
+  // 오늘 날짜 기준으로 순서 변경 이력을 남긴다 — 과거 날짜 화면엔 영향 없음
+  recordDailyOrderSnapshot(startOrder);
+  renderDaily();
 }
 
 function addChecklistItem() {
@@ -1450,7 +1571,7 @@ function renderCalDetail(dk) {
   const scColor = sc >= 4 ? 'var(--green)' : sc >= 2 ? 'var(--amber)' : sc > 0 ? 'var(--red)' : 'var(--text3)';
 
   // 체크리스트 결과
-  const checkHtml = DAILY_ITEMS.map(item => {
+  const checkHtml = getDailyItemsForDay(dk).map(item => {
     const val = saved[item.id] || '';
     if (!val) return '';
     const c = val === 'O' ? 'var(--green)' : val === '△' ? 'var(--amber)' : 'var(--red)';
