@@ -226,9 +226,10 @@ input[type=range]::-webkit-slider-thumb {
 #mobile-redo-btn { left: 70px; }
 #mobile-undo-btn:active, #mobile-redo-btn:active { background: var(--bg3); color: var(--text); }
 
-/* 체크리스트 편집 - 드래그로 순서 변경 */
+/* 체크리스트 - 드래그로 순서 변경 (메인 목록 + 편집 패널) */
 .checklist-edit-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 0.5px solid var(--border); position: relative; background: var(--bg2); }
-.checklist-edit-row.dragging { z-index: 20; background: var(--bg3); box-shadow: 0 4px 14px rgba(0,0,0,0.4); border-radius: 6px; }
+.checklist-edit-row.dragging, .check-item.dragging { z-index: 20; background: var(--bg3); box-shadow: 0 4px 14px rgba(0,0,0,0.4); border-radius: 6px; }
+.check-item { position: relative; background: var(--bg2); }
 .drag-handle { cursor: grab; color: var(--text3); font-size: 16px; padding: 4px 2px; touch-action: none; user-select: none; flex-shrink: 0; }
 .drag-handle:active { cursor: grabbing; color: var(--text); }
 
@@ -822,7 +823,8 @@ function restoreView(tab, month, day) {
 }
 
 function undoLast() {
-  if (!undoStack.length) return;
+  flushPendingSave(); // 입력 직후 0.6초 대기 중인 자동저장을 먼저 확정
+  if (!undoStack.length) { showUndoToast('되돌릴 것이 없어요'); return; }
   const { key, prev, tab, month, day } = undoStack.pop();
   // 현재 값을 redo 스택에 보관한 뒤 이전 값으로 복원
   const cur = state.data[key] ? JSON.parse(JSON.stringify(state.data[key])) : null;
@@ -835,7 +837,9 @@ function undoLast() {
 }
 
 function redoLast() {
-  if (!redoStack.length) return;
+  // 주의: flush로 setKey가 돌면 redoStack이 비워지므로, 대기 중 저장이 있을 때만 확정
+  if (_pendingSave) { flushPendingSave(); showUndoToast('다시 실행할 것이 없어요'); return; }
+  if (!redoStack.length) { showUndoToast('다시 실행할 것이 없어요'); return; }
   const { key, next, tab, month, day } = redoStack.pop();
   // 다시 적용하기 전 현재 값을 undo 스택에 되돌려놓는다
   const cur = state.data[key] ? JSON.parse(JSON.stringify(state.data[key])) : null;
@@ -923,10 +927,13 @@ function renderDaily() {
 
   const container = document.getElementById('daily-checks');
   container.innerHTML = '';
+  // 과거 날짜는 당시 순서 보존용이라 드래그 불가 — 오늘/미래에서만 핸들 표시
+  const canReorder = dk >= dayKey(new Date());
   getDailyItemsForDay(dk).forEach(item => {
     const val = saved[item.id] || '';
     const row = document.createElement('div'); row.className = 'check-item';
-    row.innerHTML = `<span class="check-label">${item.label}</span>
+    row.dataset.id = item.id;
+    row.innerHTML = `${canReorder ? `<span class="drag-handle" onpointerdown="startMainChecklistDrag(event,'${item.id}')">⠿</span>` : ''}<span class="check-label">${item.label}</span>
       <div class="toggle-group">
         <button class="tog ${val==='O'?'sel-o':''}" onclick="setCheck('${dk}','${item.id}','O',this)">O</button>
         <button class="tog ${val==='△'?'sel-d':''}" onclick="setCheck('${dk}','${item.id}','△',this)">△</button>
@@ -971,7 +978,20 @@ function onSlider(v) {
 }
 
 let _autoTimer = null;
-function _debounce(fn) { clearTimeout(_autoTimer); _autoTimer = setTimeout(fn, 600); }
+let _pendingSave = null;
+function _debounce(fn) {
+  clearTimeout(_autoTimer);
+  _pendingSave = fn;
+  _autoTimer = setTimeout(() => { _pendingSave = null; fn(); }, 600);
+}
+// 자동저장 대기 중이면 즉시 확정 — undo/redo가 "방금 친 글자"를 정확히 대상으로 삼도록
+function flushPendingSave() {
+  if (!_pendingSave) return;
+  clearTimeout(_autoTimer);
+  const fn = _pendingSave;
+  _pendingSave = null;
+  fn();
+}
 
 function autoSaveDaily() {
   _debounce(() => {
@@ -1357,27 +1377,41 @@ function renderChecklistEditPanel() {
 }
 
 // ── 체크리스트 드래그 순서 변경 (마우스 + 터치 공용, Pointer Events) ──
+// 메인 체크리스트와 편집 패널 양쪽에서 동작
 let checklistDrag = null;
 
 function startChecklistDrag(e, id) {
+  beginChecklistDrag(e, id, 'checklist-edit-list', '.checklist-edit-row', renderChecklistEditPanel);
+}
+function startMainChecklistDrag(e, id) {
+  beginChecklistDrag(e, id, 'daily-checks', '.check-item', renderDaily);
+}
+
+function beginChecklistDrag(e, id, listId, rowSel, rerender) {
   e.preventDefault();
-  const listEl = document.getElementById('checklist-edit-list');
-  const rowEl = listEl.querySelector(`.checklist-edit-row[data-id="${id}"]`);
-  checklistDrag = { id, listEl, rowEl, startY: e.clientY, startOrder: getDailyItems().map(it => it.id) };
+  const listEl = document.getElementById(listId);
+  const rowEl = listEl.querySelector(`${rowSel}[data-id="${id}"]`);
+  checklistDrag = { id, listEl, rowEl, rowSel, rerender, startY: e.clientY, startOrder: getDailyItems().map(it => it.id) };
   rowEl.classList.add('dragging');
   document.addEventListener('pointermove', onChecklistDragMove);
   document.addEventListener('pointerup', onChecklistDragEnd);
 }
 
+// 드래그 중간 단계는 undo 스택을 거치지 않고 바로 반영 (드래그 1회 = undo 1회가 되도록)
+function _applyOrderRaw(items) {
+  state.data['daily_items'] = { list: items };
+  persist();
+}
+
 function onChecklistDragMove(e) {
   if (!checklistDrag) return;
-  const { listEl } = checklistDrag;
+  const { listEl, rowSel, rerender } = checklistDrag;
   const dy = e.clientY - checklistDrag.startY;
   checklistDrag.rowEl.style.transform = `translateY(${dy}px)`;
 
   const items = getDailyItems();
   const draggingIdx = items.findIndex(it => it.id === checklistDrag.id);
-  const rows = Array.from(listEl.querySelectorAll('.checklist-edit-row'));
+  const rows = Array.from(listEl.querySelectorAll(rowSel));
   let targetIdx = draggingIdx;
   rows.forEach((row, i) => {
     if (row === checklistDrag.rowEl) return;
@@ -1390,10 +1424,10 @@ function onChecklistDragMove(e) {
   if (targetIdx !== draggingIdx) {
     const [moved] = items.splice(draggingIdx, 1);
     items.splice(targetIdx, 0, moved);
-    setKey('daily_items', { list: items });
+    _applyOrderRaw(items);
     checklistDrag.startY = e.clientY; // 재배치 후 기준점 초기화 (점프 방지)
-    renderChecklistEditPanel();
-    checklistDrag.rowEl = listEl.querySelector(`.checklist-edit-row[data-id="${checklistDrag.id}"]`);
+    rerender();
+    checklistDrag.rowEl = listEl.querySelector(`${rowSel}[data-id="${checklistDrag.id}"]`);
     checklistDrag.rowEl.classList.add('dragging');
   }
 }
@@ -1406,9 +1440,17 @@ function onChecklistDragEnd() {
   document.removeEventListener('pointerup', onChecklistDragEnd);
   const startOrder = checklistDrag.startOrder;
   checklistDrag = null;
+  // 최종 순서를 undo 1회 분량으로 기록: 시작 순서로 잠시 되돌린 뒤 setKey 한 번
+  const finalItems = getDailyItems();
+  const byId = new Map(finalItems.map(it => [it.id, it]));
+  const startItems = startOrder.map(id => byId.get(id)).filter(Boolean)
+    .concat(finalItems.filter(it => !startOrder.includes(it.id)));
+  state.data['daily_items'] = { list: startItems };
+  setKey('daily_items', { list: finalItems });
   // 오늘 날짜 기준으로 순서 변경 이력을 남긴다 — 과거 날짜 화면엔 영향 없음
   recordDailyOrderSnapshot(startOrder);
   renderDaily();
+  if (document.getElementById('checklist-edit-panel').style.display !== 'none') renderChecklistEditPanel();
 }
 
 function addChecklistItem() {
